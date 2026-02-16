@@ -728,11 +728,8 @@ class QueryResult(object):
         self.collection = collection
         self._client = collection._client
         self._block_ids = self._get_block_ids(result)
-        self.total = result.get("total", -1)
-        self.aggregates = result.get("aggregationResults", [])
-        self.aggregate_ids = [
-            agg.get("id") for agg in (query.aggregate or query.aggregations)
-        ]
+        self.total = result.get("total", result.get("sizeHint", -1))
+        self._reducer_results = result.get("reducerResults", {})
         self.query = query
 
     def _get_block_ids(self, result):
@@ -744,10 +741,10 @@ class QueryResult(object):
         return block
 
     def get_aggregate(self, id):
-        for agg_id, agg in zip(self.aggregate_ids, self.aggregates):
-            if id == agg_id:
-                return agg["value"]
-        return None
+        reducer = self._reducer_results.get(id, {})
+        agg_result = reducer.get("aggregationResult", {})
+        return agg_result.get("value")
+
 
     def __repr__(self):
         if not len(self):

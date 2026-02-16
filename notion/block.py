@@ -222,7 +222,14 @@ class Block(Record):
 
     @property
     def space_info(self):
-        return self._client.post("getPublicPageData", {"blockId": self.id}).json()
+        try:
+            data = self._client.post("getPublicPageData", {"blockId": self.id}).json()
+        except Exception:
+            return {}
+        # a response with only {"publicAccessRole": "none"} means the page is gone
+        if list(data.keys()) == ["publicAccessRole"] and data["publicAccessRole"] == "none":
+            return {}
+        return data
 
     def _str_fields(self):
         """
@@ -454,7 +461,7 @@ class Block(Record):
             response = self._client.post("https://www.notion.so/api/v3/getTasks", {
                 "taskIds": [task_id]
             }).json()
-            if response["results"][0]["state"] == "success":
+            if response["results"] and response["results"][0]["state"] == "success":
                 break
             time.sleep(0.25)
 
@@ -591,7 +598,10 @@ class PageBlock(BasicBlock):
         """
         Returns a list of blocks that referencing the current PageBlock. Note that only PageBlocks support backlinks.
         """
-        data = self._client.post("getBacklinksForBlock", {"blockId": self.id}).json()
+        data = self._client.post(
+            "getBacklinksForBlockInitial",
+            {"block": {"id": self.id, "spaceId": self.get("space_id")}},
+        ).json()
         backlinks = []
         for block in data.get("backlinks") or []:
             mention = block.get("mentioned_from")

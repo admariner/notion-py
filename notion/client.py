@@ -325,7 +325,7 @@ class NotionClient(object):
         query="",
         search_type="BlocksInSpace",
         limit=100,
-        sort="Relevance",
+        sort="relevance",
         source="quick_find",
         isDeletedOnly=False,
         excludeTemplates=False,
@@ -353,7 +353,7 @@ class NotionClient(object):
                 "lastEditedTime": lastEditedTime,
                 "createdTime": createdTime,
             },
-            "sort": sort,
+            "sort": {"field": sort} if isinstance(sort, str) else sort,
             "source": source,
         }
         response = self.post("search", data).json()
@@ -376,6 +376,7 @@ class NotionClient(object):
             "created_time": now(),
             "parent_id": parent.id,
             "parent_table": parent._table,
+            "space_id": self.current_space.id,
         }
 
         args.update(kwargs)

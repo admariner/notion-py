@@ -221,7 +221,7 @@ class RecordStore(object):
 
     def call_get_record_values(self, **kwargs):
         """
-        Call the server's getRecordValues endpoint to update the local record store. The keyword arguments map
+        Call the server's syncRecordValues endpoint to update the local record store. The keyword arguments map
         table names into lists of (or singular) record IDs to load for that table. Use True to refresh all known
         records for that table.
         """
@@ -243,24 +243,21 @@ class RecordStore(object):
                 )
                 continue
 
-            requestlist += [{"table": table, "id": extract_id(id)} for id in ids]
+            requestlist += [
+                {"pointer": {"table": table, "id": extract_id(id)}, "version": -1}
+                for id in ids
+            ]
 
         if requestlist:
             logger.debug(
-                "Calling 'getRecordValues' endpoint for requests: {}".format(
+                "Calling 'syncRecordValues' endpoint for requests: {}".format(
                     requestlist
                 )
             )
-            results = self._client.post(
-                "getRecordValues", {"requests": requestlist}
-            ).json()["results"]
-            for request, result in zip(requestlist, results):
-                self._update_record(
-                    request["table"],
-                    request["id"],
-                    value=result.get("value"),
-                    role=result.get("role"),
-                )
+            recordmap = self._client.post(
+                "syncRecordValues", {"requests": requestlist}
+            ).json().get("recordMap", {})
+            self.store_recordmap(recordmap)
 
     def get_current_version(self, table, id):
         values = self._get(table, id)
@@ -294,9 +291,14 @@ class RecordStore(object):
             for id, record in records.items():
                 if not isinstance(record, dict):
                     continue
-                self._update_record(
-                    table, id, value=record.get("value"), role=record.get("role")
-                )
+                # handle both old format {"value": {...}, "role": "..."}
+                # and new format {"spaceId": "...", "value": {"value": {...}, "role": "..."}}
+                value = record.get("value")
+                role = record.get("role")
+                if isinstance(value, dict) and "value" in value and "role" in value:
+                    role = value.get("role")
+                    value = value.get("value")
+                self._update_record(table, id, value=value, role=role)
 
     def call_query_collection(
         self,
@@ -324,18 +326,34 @@ class RecordStore(object):
         if isinstance(sort, dict):
             sort = [sort]
 
+        if not space_id:
+            space_id = self._client.current_space.id
+
+        reducers = {
+            "collection_group_results": {
+                "type": "results",
+                "limit": limit,
+            },
+        }
+
+        # add aggregations as reducers (new API format)
+        for agg in (aggregate or aggregations):
+            agg_id = agg.get("id", agg.get("property"))
+            reducers[agg_id] = {
+                "type": "aggregation",
+                "aggregation": {
+                    "property": agg["property"],
+                    "aggregator": agg["aggregator"],
+                },
+            }
+
         data = {
             "collectionView": {
                 "id": collection_view_id,
                 "spaceId": space_id
             },
             "loader": {
-                "reducers": {
-                    "collection_group_results": {
-                        "type": "results",
-                        "limit": limit,
-                    },
-                },
+                "reducers": reducers,
                 "sort": sort,
                 "searchQuery": search,
                 "userId": self._client.current_user.id,
@@ -350,12 +368,6 @@ class RecordStore(object):
 
         if filter:
             data["loader"]["filter"] = filter
-
-        if aggregate:
-            data["loader"]["aggregate"] = aggregate
-
-        if aggregations:
-            data["loader"]["aggregations"] = aggregations
 
         response = self._client.post("queryCollection", data).json()
 
