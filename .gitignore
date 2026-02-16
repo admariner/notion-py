@@ -7,5 +7,6 @@ dist/
 
 # pipenv
 .env
+.envrc
 .venv
 Pipfile
